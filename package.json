@@ -1,0 +1,11 @@
+{
+  "name": "sec_tool",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "xi4f3i <xi4f3i@gmail.com>",
+  "license": "ISC",
+  "description": ""
+}
