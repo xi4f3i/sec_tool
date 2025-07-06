@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import { companies } from './data/company.js';
 import { company_tickers_exchange } from './data/company_tickers_exchange.js';
 import puppeteer from 'puppeteer';
+import * as cheerio from 'cheerio';
 
 function getCIKByTicker(target_ticker) {
     const list = company_tickers_exchange.data;
@@ -46,7 +47,7 @@ async function getCIKJSONByCIK(cik, ticker) {
     const res = await resp.json();
 
     try {
-        const resp01 = await ffetch(
+        const resp01 = await fetch(
             `https://data.sec.gov/submissions/CIK${cik}-submissions-001.json`,
             {
                 headers: {
@@ -74,7 +75,9 @@ async function getCIKJSONByCIK(cik, ticker) {
             );
         });
     } catch (err) {
-        console.warn(`Failed to fetch https://data.sec.gov/submissions/CIK${cik}-submissions-001.json`);
+        console.warn(
+            `Failed to fetch https://data.sec.gov/submissions/CIK${cik}-submissions-001.json`
+        );
     }
 
     return res;
@@ -118,6 +121,7 @@ const errors = {
     noCikOrCikStr: [],
     noReportURL: [],
     noReportHTML: [],
+    resolveAsHTML: [],
 };
 
 async function saveResult() {
@@ -207,6 +211,40 @@ async function checkOrCreateDir(dir) {
     }
 }
 
+async function resolveReport(reportHTML) {
+    const $ = cheerio.load(reportHTML);
+    const is10KOld = $('type').text().includes('10-K');
+    const is10KNew = $('ix\\:nonnumeric').text().includes('10-K');
+    const is20FOld = $('type').text().includes('20-F');
+    const is20FNew = $('ix\\:nonnumeric').text().includes('20-F');
+
+    const docType =
+        is10KOld || is10KNew ? '10-K' : is20FOld || is20FNew ? '20-F' : null;
+    const docVersion = is10KNew || is20FNew ? 'New' : 'Old';
+
+    console.log(docType, docVersion);
+
+    if (!docType) {
+        throw new Error('Unknown document type');
+    }
+
+    if (docVersion === 'New') {
+        if (docType === '10-K') {
+        } else {
+        }
+    } else {
+        if (docType === '10-K') {
+            $('text p').each((index, element) => {
+                const text = $(element).text();
+                console.log(text);
+            });
+        } else {
+        }
+    }
+
+    return [];
+}
+
 async function resolveEachYear() {
     const tickers = Object.keys(output);
     for (const ticker of tickers) {
@@ -231,35 +269,61 @@ async function resolveEachYear() {
             console.log(`    -> reportURL: ${reportURL}`);
 
             let reportHTML;
-            try {
-                reportHTML = await getReportHTML(reportURL);
-                if (!reportHTML) {
+            const reportHTMLPath = `./output/${ticker}/${year}.html`;
+            if (
+                await fs
+                    .access(reportHTMLPath)
+                    .then(() => true)
+                    .catch(() => false)
+            ) {
+                console.log(
+                    `      -> reportHTMLPath: ${reportHTMLPath} exists`
+                );
+                reportHTML = await fs.readFile(reportHTMLPath, 'utf-8');
+            } else {
+                try {
+                    reportHTML = await getReportHTML(reportURL);
+                    if (!reportHTML) {
+                        errors.noReportHTML.push({
+                            ticker,
+                            year,
+                            reportURL,
+                        });
+                        continue;
+                    }
+                } catch (error) {
+                    console.error(
+                        `      -> Failed to fetch report HTML from ${reportURL}:`,
+                        error.message
+                    );
                     errors.noReportHTML.push({
                         ticker,
                         year,
                         reportURL,
+                        err: error.message,
                     });
                     continue;
                 }
+
+                fs.writeFile(reportHTMLPath, reportHTML, 'utf-8');
+            }
+
+            try {
+                const sentences = await resolveReport(reportHTML);
+                years[year].sentences = sentences;
             } catch (error) {
-                console.error(
-                    `Failed to fetch report HTML from ${reportURL}:`,
+                console.warn(
+                    `      -> Failed to resolve report HTML from ${reportURL}:`,
                     error.message
                 );
-                errors.noReportHTML.push({
+                errors.resolveAsHTML.push({
                     ticker,
                     year,
                     reportURL,
+                    reportHTMLPath,
                     err: error.message,
                 });
-                continue;
             }
-
-            fs.writeFile(
-                `./output/${ticker}/${year}.html`,
-                reportHTML,
-                'utf-8'
-            );
         }
     }
 }
