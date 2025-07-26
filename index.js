@@ -105,7 +105,6 @@ function initOutput() {
         };
 
         item.years[year] = {
-            sentences: [],
             reportURL: null,
         };
 
@@ -210,243 +209,135 @@ async function checkOrCreateDir(dir) {
         await fs.mkdir(dir, { recursive: true });
     }
 }
-
-async function resolveReport(reportHTML) {
-    const $ = cheerio.load(reportHTML);
-    const is10KOld = $('type').text().includes('10-K');
+let count = 0;
+async function parseReport(report) {
+    const $ = cheerio.load(report);
+    const is10KOld = report.includes('<type>10-K');
     const is10KNew = $('ix\\:nonnumeric').text().includes('10-K');
-    const is20FOld = $('type').text().includes('20-F');
+    const is20FOld = report.includes('<type>20-F');
     const is20FNew = $('ix\\:nonnumeric').text().includes('20-F');
 
     const docType =
         is20FOld || is20FNew ? '20-F' : is10KOld || is10KNew ? '10-K' : null;
     const docVersion = is10KNew || is20FNew ? 'New' : 'Old';
 
-    console.log(docType, docVersion);
+    // console.log(docType, docVersion);
 
     if (!docType) {
         throw new Error('Unknown document type');
     }
 
     let pharagraphs = {};
-    if (docVersion === 'New') {
+
+    if (docType === '10-K') {
+        pharagraphs = {
+            1: [],
+            '1A': [],
+            7: [],
+        };
+    } else if (docType === '20-F') {
+        pharagraphs = {
+            '4B': [],
+            '3D': [],
+            5: [],
+        };
+    }
+    const allElements = $('*');
+    let curItem = '';
+    allElements.each((_, el) => {
+        const element = $(el);
+        const text = element
+            .contents()
+            .filter(function () {
+                return this.type === 'text';
+            })
+            .text()
+            .trim()
+            .replaceAll('\n', ' ')
+            .replaceAll('  ', ' ');
+
         if (docType === '10-K') {
-            pharagraphs = {
-                1: [],
-                '1A': [],
-                7: [],
-            };
-            let curItem = '';
-            let l = 0;
-            $('body > div').each((i, el) => {
-                const rootDivEl = $(el);
-                if (rootDivEl.children().length <= 0) {
-                    return;
-                }
-
-                if (rootDivEl.children().first()[0].tagName !== 'div') {
-                    return;
-                }
-
-                rootDivEl
-                    .children()
-                    .first()
-                    .children()
-                    .each((j, ele) => {
-                        if (
-                            $(ele).first().children().first()?.[0]?.tagName ===
-                                'b' &&
-                            $(ele)
-                                .first()
-                                .children()
-                                .first()
-                                ?.text?.()
-                                ?.includes?.('Item')
-                        ) {
-                            const match = $(ele)
-                                .last()
-                                .text()
-                                .match(/(\d+[A-Z]?)\./);
-                            if (match) {
-                                curItem = match[1];
-                                // console.log(
-                                //     curItem,
-                                //     l + j,
-                                //     ele.tagName,
-                                //     ele.type
-                                // );
-                            }
-                        }
-
-                        if (
-                            (curItem === '1' ||
-                                curItem === '1A' ||
-                                curItem === '7') &&
-                            $(ele).text().length > 0
-                        ) {
-                            pharagraphs[curItem].push(
-                                $(ele)
-                                    .text()
-                                    .replaceAll('  ', '')
-                                    .replaceAll('\n', ' ')
-                            );
-                        }
-                    });
-                l += rootDivEl.children().first().children().length;
-            });
-            console.log(
-                l,
-                pharagraphs[1].length,
-                pharagraphs['1A'].length,
-                pharagraphs[7].length
-            );
-        } else {
-            pharagraphs = {
-                '4B': [],
-                '3D': [],
-                5: [],
-            };
-            let curItem = '';
-            let l = 0;
-            $('body > div').each((i, el) => {
-                const rootDivEl = $(el);
-                if (rootDivEl.children().length <= 0) {
-                    return;
-                }
-
-                rootDivEl.children().each((i, el2) => {
-                    $(el2)
-                        .children()
-                        .each((j, el3) => {
-                            l++;
-                            const ele3 = $(el3);
-                            const textContent = ele3.text();
-                            const matchItem =
-                                textContent.match(/Item\s*\u00a0(\d+)\./);
-                            const matchSubItem =
-                                textContent.match(/(\d+\d?)\.([A-Z])\./);
-                            if (
-                                ele3[0].tagName === 'p' &&
-                                ele3[0].attribs.style ===
-                                    `font-family:'Times New Roman','Times','serif';font-size:10pt;font-weight:bold;margin:0pt 0pt 12pt 0pt;`
-                            ) {
-                                if (matchItem) {
-                                    curItem = matchItem[1];
-                                    // console.log(
-                                    //     curItem,
-                                    //     l,
-                                    //     ele3[0].tagName,
-                                    //     ele3[0].type
-                                    // );
-                                } else if (matchSubItem) {
-                                    curItem = `${matchSubItem[1]}${matchSubItem[2]}`;
-                                    // console.log(
-                                    //     curItem,
-                                    //     l,
-                                    //     ele3[0].tagName,
-                                    //     ele3[0].type
-                                    // );
-                                }
-                            }
-
-                            if (
-                                (curItem === '4B' ||
-                                    curItem === '3D' ||
-                                    curItem.charAt(0) === '5') &&
-                                textContent.length > 0
-                            ) {
-                                pharagraphs[
-                                    curItem.charAt(0) === '5' ? '5' : curItem
-                                ].push(
-                                    textContent
-                                        .replaceAll('  ', '')
-                                        .replaceAll('\n', ' ')
-                                );
-                            }
-                        });
-                });
-            });
-            console.log(
-                l,
-                pharagraphs['4B'].length,
-                pharagraphs['3D'].length,
-                pharagraphs[5].length
-            );
-        }
-    } else {
-        if (docType === '10-K') {
-            const subElements = $('text').children();
-            pharagraphs = {
-                1: [],
-                '1A': [],
-                7: [],
-            };
-            let curItem = '';
-            subElements.each((i, el) => {
-                const textContent = $(el).text();
-                const match = textContent.match(/Item\s*\u00a0(\d+[A-Z]?)\./);
+            const match = text.match(/tem (\d+[A-Z]?)\.?\:?/);
+            const match1 = text.match(/tem\s*\u00a0(\d+[A-Z]?)\.?\:?/);
+            const match2 = text.match(/TEM\s*\u00a0(\d+[A-Z]?)\.?\:?/);
+            const match3 = text.match(/TEM (\d+[A-Z]?)\.?\:?/);
+            const match4 = text.match(/tem\n(\d+[A-Z]?)\.?\:?/);
+            const match5 = text.match(/TEM\n(\d+[A-Z]?)\.?\:?/);
+            const match6 = text.match(/m (\d+[A-Z]?)\.?/);
+            if (text.length <= 30) {
                 if (match) {
                     curItem = match[1];
-                    // console.log(curItem, i, el.tagName, el.type);
+                } else if (match1) {
+                    curItem = match1[1];
+                } else if (match2) {
+                    curItem = match2[1];
+                } else if (match3) {
+                    curItem = match3[1];
+                } else if (match4) {
+                    curItem = match4[1];
+                } else if (match5) {
+                    curItem = match5[1];
+                } else if (match6) {
+                    curItem = match6[1];
                 }
+            }
 
-                if (
-                    (curItem === '1' || curItem === '1A' || curItem === '7') &&
-                    textContent.length > 0
-                ) {
-                    pharagraphs[curItem].push(
-                        textContent.replaceAll('  ', '').replaceAll('\n', ' ')
-                    );
-                }
-            });
-            console.log(
-                subElements.length,
-                pharagraphs[1].length,
-                pharagraphs['1A'].length,
-                pharagraphs[7].length
-            );
-        } else {
-            const subElements = $('text').children();
-            pharagraphs = {
-                '4B': [],
-                '3D': [],
-                5: [],
-            };
-            let curItem = '';
-            subElements.each((i, el) => {
-                const textContent = $(el).text();
-                const matchItem = textContent.match(/ITEM (\d+\d?)\./);
-                const matchSubItem = textContent.match(/(\d+\d?)\.([A-Z])\./);
-                const isTitle = $($(el).children()?.[0])
-                    ?.attr?.('name')
-                    ?.startsWith?.('HTI_');
-                if (matchItem && el.tagName === 'p' && isTitle) {
-                    curItem = matchItem[1];
-                    // console.log(curItem, i, el.tagName, el.type);
-                } else if (matchSubItem && el.tagName === 'p' && isTitle) {
+            if (
+                (curItem == '1' || curItem == '1A' || curItem == '7') &&
+                filterpParagraphByWords(text)
+            ) {
+                pharagraphs[curItem].push(text);
+            }
+        } else if (docType === '20-F') {
+            const match = text.match(/TEM (\d+[A-Z]?)\.?\:?/);
+            const matchSubItem = text.match(/(\d+\d?)\.?\:?([A-Z])\.?\:?/);
+            const match1 = text.match(/tem\s*\u00a0(\d+[A-Z]?)\.?\:?/);
+            const match2 = text.match(/tem (\d+[A-Z]?)\.?\:?/);
+            const match3 = text.match(/TEM\s*\u00a0(\d+[A-Z]?)\.?\:?/);
+            const match4 = text.match(/tem\n(\d+[A-Z]?)\.?\:?/);
+            const match5 = text.match(/TEM\n(\d+[A-Z]?)\.?\:?/);
+            const match6 = text.match(/([A-Z])\./);
+            const match7 = text.match(/I(\d+[A-Z]?)\./);
+            if (text.length <= 50) {
+                if (match) {
+                    curItem = match[1];
+                } else if (matchSubItem) {
                     curItem = `${matchSubItem[1]}${matchSubItem[2]}`;
-                    // console.log(curItem, i, el.tagName, el.type);
+                } else if (match1) {
+                    curItem = match1[1];
+                } else if (match2) {
+                    curItem = match2[1];
+                } else if (match3) {
+                    curItem = match3[1];
+                } else if (match4) {
+                    curItem = match4[1];
+                } else if (match5) {
+                    curItem = match5[1];
+                } else if (match6) {
+                    if (!isNaN(Number(curItem))) {
+                        curItem = curItem + match6[1];
+                    } else if (curItem.length > 1) {
+                        curItem =
+                            curItem.slice(0, curItem.length - 1) + match6[1];
+                    }
+                } else if (match7) {
+                    curItem = match7[1];
                 }
+            }
 
-                if (
-                    (curItem === '4B' ||
-                        curItem === '3D' ||
-                        curItem.charAt(0) === '5') &&
-                    textContent.length > 0
-                ) {
-                    pharagraphs[curItem.charAt(0) === '5' ? '5' : curItem].push(
-                        textContent.replaceAll('  ', '').replaceAll('\n', ' ')
-                    );
-                }
-            });
-            console.log(
-                subElements.length,
-                pharagraphs['4B'].length,
-                pharagraphs['3D'].length,
-                pharagraphs[5].length
-            );
+            if (
+                (curItem === '4B' ||
+                    curItem === '3D' ||
+                    curItem.charAt(0) === '5') &&
+                filterpParagraphByWords(text)
+            ) {
+                pharagraphs[curItem.charAt(0) === '5' ? '5' : curItem].push(
+                    text
+                );
+            }
         }
-    }
+    });
+
     const keys = Object.keys(pharagraphs);
     if (keys.every((key) => pharagraphs[key].length <= 0)) {
         throw new Error('empty pharagraphs');
@@ -455,28 +346,39 @@ async function resolveReport(reportHTML) {
     return pharagraphs;
 }
 
+function filterpParagraphByWords(text) {
+    if (text.length < 10) return false;
+    text = text.toLowerCase();
+    for (let word of words) {
+        if (text.includes(word)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 async function resolveEachYear() {
     const tickers = Object.keys(output);
     for (const ticker of tickers) {
-        console.log(`resolve ${ticker}`);
+        // console.log(`resolve ${ticker}`);
         const { cik, cikStr, years } = output[ticker];
 
         const cikJSON = await getCIKJSONByCIK(cikStr, ticker);
         cikData[ticker] = cikJSON;
         checkOrCreateDir(`./output/${ticker}/`);
 
-        for (const year of Object.keys(years)) {
-            console.log(`  -> resolve ${year}`);
-            const reportURL = getReportURL(cikJSON, cik, year);
-            if (!reportURL) {
-                errors.noReportURL.push({
-                    ticker,
-                    year,
-                });
-                continue;
-            }
-            years[year].reportURL = reportURL;
-            console.log(`    -> reportURL: ${reportURL}`);
+        for (const year of [2014,2015,2016,2017,2018,2019,2020,2021,2022,2023]) {
+            // console.log(`  -> resolve ${year}`);
+            // const reportURL = getReportURL(cikJSON, cik, year);
+            // if (!reportURL) {
+            //     errors.noReportURL.push({
+            //         ticker,
+            //         year,
+            //     });
+            //     continue;
+            // }
+            // years[year].reportURL = reportURL;
+            // console.log(`    -> reportURL: ${reportURL}`);
 
             let reportHTML;
             const reportHTMLPath = `./output/${ticker}/${year}.html`;
@@ -486,55 +388,70 @@ async function resolveEachYear() {
                     .then(() => true)
                     .catch(() => false)
             ) {
-                console.log(
-                    `      -> reportHTMLPath: ${reportHTMLPath} exists`
-                );
+                // console.log(
+                //     `      -> reportHTMLPath: ${reportHTMLPath} exists`
+                // );
+                count++;
                 reportHTML = await fs.readFile(reportHTMLPath, 'utf-8');
             } else {
-                try {
-                    reportHTML = await getReportHTML(reportURL);
-                    if (!reportHTML) {
-                        errors.noReportHTML.push({
-                            ticker,
-                            year,
-                            reportURL,
-                        });
-                        continue;
-                    }
-                } catch (error) {
-                    console.error(
-                        `      -> Failed to fetch report HTML from ${reportURL}:`,
-                        error.message
-                    );
-                    errors.noReportHTML.push({
-                        ticker,
-                        year,
-                        reportURL,
-                        err: error.message,
-                    });
-                    continue;
-                }
+                continue;
+                // try {
+                //     reportHTML = await getReportHTML(reportURL);
+                //     if (!reportHTML) {
+                //         errors.noReportHTML.push({
+                //             ticker,
+                //             year,
+                //             reportURL,
+                //         });
+                //         continue;
+                //     }
+                // } catch (error) {
+                //     console.error(
+                //         `      -> Failed to fetch report HTML from ${reportURL}:`,
+                //         error.message
+                //     );
+                //     errors.noReportHTML.push({
+                //         ticker,
+                //         year,
+                //         reportURL,
+                //         err: error.message,
+                //     });
+                //     continue;
+                // }
 
-                fs.writeFile(reportHTMLPath, reportHTML, 'utf-8');
+                // fs.writeFile(reportHTMLPath, reportHTML, 'utf-8');
             }
 
             try {
-                const pharagraphs = await resolveReport(reportHTML);
-                // years[year].pharagraphs = pharagraphs;
+                const pharagraphs = await parseReport(reportHTML);
+
+                const keys = Object.keys(pharagraphs);
+                let words = 0;
+                for (let key of keys) {
+                    words += pharagraphs[key].reduce((p, c) => {
+                        return p + c.split(' ').length + 1;
+                    }, 0);
+                }
+
+                years[year].pharagraphs = pharagraphs;
+                years[year].words = words;
                 fs.writeFile(
                     `./output/${ticker}/${year}.json`,
-                    JSON.stringify(pharagraphs),
+                    JSON.stringify({
+                        ...years[year],
+                        pharagraphs,
+                    }),
                     'utf-8'
                 );
             } catch (error) {
                 console.warn(
-                    `      -> Failed to resolve report HTML from ${reportURL}:`,
+                    `-> Failed to resolve report HTML from:`,
                     error.message
                 );
                 errors.resolveAsHTML.push({
                     ticker,
                     year,
-                    reportURL,
+                    // reportURL,
                     reportHTMLPath,
                     err: error.message,
                 });
@@ -554,16 +471,26 @@ async function initCIKData() {
     }
 }
 
+let words = [];
+
+async function initWords() {
+    words = (await fs.readFile('./data/words.txt', 'utf-8')).split('\n');
+    console.log(`words length: ${words.length}`);
+    words = words.map((word) => word.trim());
+}
+
 async function entryPoint() {
     console.log('Start----------------------');
-    console.log('1. initialize cik data');
+    console.log('1. initialize cik data & words');
     await initCIKData();
+    await initWords();
     console.log('2. initialize output');
     initOutput();
     console.log('3. resolve each year');
     await resolveEachYear();
     console.log('4. save result');
     await saveResult();
+    console.log('count: ', count);
     console.log('End----------------------');
 }
 
